@@ -1,98 +1,88 @@
-// Entry program for the gta6-meme-x-01 make.fun bounty.
+// Entry program for the gta6-meme-x-01 bounty on make.fun.
 //
-// The entry itself is a public post on X; this repository only points at it.
-// When the grader runs this program it expects POST.json to be handed over,
-// so that is what happens here: read POST.json from the bot directory, check
-// that it really names an X post, then place a copy in the output directory.
+// The entry itself is a public post on X. This repository carries a
+// pointer to that post (POST.json) and a copy of the meme image
+// (meme.png). When run, the program checks that the pointer really
+// names an X post, then delivers both files to the output directory
+// for the grader.
 //
-// Both locations can be overridden, which is how the local test run works:
-//   MAKEFUN_BOT_DIR     directory holding POST.json   (default: /bot)
-//   MAKEFUN_OUTPUT_DIR  directory receiving the copy  (default: /output)
+// Both directories come from the environment, with sandbox defaults:
+//   MAKEFUN_BOT_DIR     folder holding POST.json and meme.png (/bot)
+//   MAKEFUN_OUTPUT_DIR  folder that receives the copies       (/output)
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const botDir = process.env.MAKEFUN_BOT_DIR ?? "/bot";
 const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
-const postFileName = "POST.json";
 
-// The hosts an X post address may live on; a "www." or "mobile." prefix on
-// either of them is fine and is stripped before the comparison.
-const postHosts = ["x.com", "twitter.com"];
-
-function fail(reason: string): never {
-  console.error(`meme-x entry: ${reason}`);
+function die(message: string): never {
+  console.error(`gta6-meme-x: ${message}`);
   process.exit(1);
 }
 
-function readPostFile(path: string): string {
-  if (!existsSync(path)) {
-    fail(`no POST.json found at ${path}`);
+// Read POST.json and pull the post's handle and numeric id out of its
+// URL, rejecting anything that is not an https link to a status page
+// on x.com or twitter.com (a www. or mobile. prefix is acceptable).
+function readPostRef(): { handle: string; postId: string } {
+  const postPath = join(botDir, "POST.json");
+  if (!existsSync(postPath)) {
+    die(`POST.json not found in ${botDir}`);
   }
-  try {
-    return readFileSync(path, "utf8");
-  } catch (err) {
-    fail(`could not read ${path}: ${(err as Error).message}`);
-  }
-}
 
-interface PostRef {
-  url: string;
-  handle: string;
-  id: string;
-}
-
-// Parse the address properly instead of pattern-matching the raw string:
-// the URL parser rejects malformed input on its own, and checking the host
-// and the path segments one by one keeps odd look-alike addresses out.
-function postUrlFrom(raw: string): PostRef {
   let data: unknown;
   try {
-    data = JSON.parse(raw);
+    data = JSON.parse(readFileSync(postPath, "utf8"));
   } catch {
-    fail("POST.json is not valid JSON");
-  }
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    fail('POST.json must be a JSON object carrying a "url" field');
-  }
-  const url = (data as { url?: unknown }).url;
-  if (typeof url !== "string" || url.length === 0) {
-    fail('POST.json does not carry a string "url"');
+    die("POST.json could not be parsed as JSON");
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    fail(`"${url}" cannot be parsed as a URL at all`);
+  const url =
+    data !== null && typeof data === "object"
+      ? (data as { url?: unknown }).url
+      : undefined;
+  if (typeof url !== "string" || url.trim() === "") {
+    die('POST.json does not contain a "url" string');
   }
-  const host = parsed.hostname.replace(/^(www\.|mobile\.)/, "");
-  if (parsed.protocol !== "https:" || !postHosts.includes(host)) {
-    fail(`"${url}" is not an https address on x.com or twitter.com`);
-  }
-  const segments = parsed.pathname.split("/").filter((part) => part !== "");
-  const [handle, kind, id] = segments;
-  if (
-    segments.length !== 3 ||
-    kind !== "status" ||
-    !/^[A-Za-z0-9_]+$/.test(handle) ||
-    !/^\d+$/.test(id)
-  ) {
-    fail(
+
+  const match =
+    /^https:\/\/(?:www\.|mobile\.)?(?:x\.com|twitter\.com)\/([A-Za-z0-9_]+)\/status\/(\d+)\/?$/.exec(
+      url.trim(),
+    );
+  if (!match) {
+    die(
       `"${url}" is not an X post address ` +
         "(expected https://x.com/<handle>/status/<numeric id>)",
     );
   }
-  return { url, handle, id };
+  return { handle: match[1], postId: match[2] };
 }
 
-const sourcePath = join(botDir, postFileName);
-const raw = readPostFile(sourcePath);
-const post = postUrlFrom(raw);
+const post = readPostRef();
+
+const memePath = join(botDir, "meme.png");
+if (!existsSync(memePath)) {
+  die(`meme.png not found in ${botDir}`);
+}
+
+// Guard against a renamed or corrupt image being handed over: every
+// real PNG file starts with this fixed 8-byte signature.
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const memeBytes = readFileSync(memePath);
+const looksPng =
+  memeBytes.length >= PNG_SIGNATURE.length &&
+  PNG_SIGNATURE.every((byte, index) => memeBytes[index] === byte);
+if (!looksPng) {
+  die("meme.png is not a valid PNG file (bad PNG signature)");
+}
 
 mkdirSync(outputDir, { recursive: true });
-const targetPath = join(outputDir, postFileName);
-writeFileSync(targetPath, raw);
+copyFileSync(join(botDir, "POST.json"), join(outputDir, "POST.json"));
+copyFileSync(memePath, join(outputDir, "meme.png"));
+
 console.log(
-  `meme-x entry: copied POST.json (post ${post.id} by @${post.handle}) to ${targetPath}`,
+  `gta6-meme-x: copied POST.json (post ${post.postId} by @${post.handle}) into ${outputDir}`,
+);
+console.log(
+  `gta6-meme-x: copied meme.png (${memeBytes.length} bytes) into ${outputDir}`,
 );
