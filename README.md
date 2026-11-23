@@ -10,7 +10,7 @@ An original GTA 6 waiting meme: a State of Leonida driver license issued to a fa
 
 The meme is the entry, and it lives on X, posted publicly by the entrant:
 
-https://x.com/spidolhitam11/status/2124683916347080897
+https://x.com/spidolhitam11/status/2124687285358821746
 
 This repository names that post in [POST.json](POST.json). The small program in [main.ts](main.ts) validates the post address in POST.json and hands the file to the grader by copying it into the output directory.
 
